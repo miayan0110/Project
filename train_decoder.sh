@@ -18,7 +18,17 @@ python -m torch.distributed.launch \
 --nproc_per_node=1 --master_port=${port} train_decoder.py \
 --gpu_id 4 \
 --data_path ./datasets/miiw_train/train \
---save_per_epoch 5 \
+--save_per_epoch 2 \
 --batch_size 8 \
 --num_epochs 50 \
 --resume \
+
+# gpu id | real id
+#    0   |    2
+#    1   |    4
+#    2   |    6
+#    3   |    0
+#    4   |    1
+#    5   |    3
+#    6   |    5
+#    7   |    7

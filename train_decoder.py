@@ -32,7 +32,7 @@ def main(args):
     pretrained_model = load_latent_intrinsic(args.latent_intrinsic_weight, args.gpu_id)
     decoder_dataloader = DataLoader(MIIWDataset(pretrained_model, args, for_decoder=True), batch_size=args.batch_size, shuffle=True)
 
-    train_decoder(decoder_dataloader, args, device=f'cuda:{args.gpu_id}', save_root=args.decoder_ckpt_root, resume=False)
+    train_decoder(decoder_dataloader, args, device=f'cuda:{args.gpu_id}', save_root=args.decoder_ckpt_root, resume=args.resume)
 
     # eval(args, device=f'cuda:{args.gpu_id}')    
     # eval(args, pretrained_model, device=f'cuda:{args.gpu_id}')    

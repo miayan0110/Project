@@ -32,7 +32,7 @@ def main(args):
     pretrained_model = load_latent_intrinsic(args.latent_intrinsic_weight, args.gpu_id)
     diff_dataloader = DataLoader(MIIWDataset(pretrained_model, args), batch_size=args.batch_size, shuffle=True)
 
-    train_extrinsic_diffusion(diff_dataloader, args, device=f'cuda:{args.gpu_id}', save_root=args.extrinsic_ckpt_root, resume=args.resume)
+    train_intrinsic_diffusion(diff_dataloader, args, device=f'cuda:{args.gpu_id}', save_root=args.intrinsic_ckpt_root, resume=args.resume)
 
     # eval(args, device=f'cuda:{args.gpu_id}')    
     # eval(args, pretrained_model, device=f'cuda:{args.gpu_id}')    

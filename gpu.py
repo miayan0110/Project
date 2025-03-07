@@ -41,15 +41,3 @@ def list_total_gpu_usage():
 
 # 呼叫函數查看完整 GPU 使用狀況
 list_total_gpu_usage()
-
-
-
-# gpu id | real id
-#    0   |    2
-#    1   |    4
-#    2   |    6
-#    3   |    0
-#    4   |    1
-#    5   |    3
-#    6   |    5
-#    7   |    7

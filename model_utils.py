@@ -28,7 +28,7 @@ def train_intrinsic_diffusion(train_loader, args, device="cuda", save_root="./ck
     
     if resume:
         ckpt_list = glob.glob(f'{save_root}/*.pth')
-        ckpt_list = ckpt_list.sort()
+        ckpt_list.sort()
         model, optimizer, start_epoch, _ = load_model(model, optimizer, ckpt_list[-1], device)
     
     model.train()
@@ -59,7 +59,7 @@ def train_intrinsic_diffusion(train_loader, args, device="cuda", save_root="./ck
         
         print(f"Epoch {epoch+1} - Avg Loss: {epoch_loss / len(train_loader):.6f}")
         if (epoch+1) % args.save_per_epoch == 0:
-            save_model(model, optimizer, epoch + 1, epoch_loss / len(train_loader), f'{save_root}/checkpoint_{epoch+1}.pth')
+            save_model(model, optimizer, epoch + 1, epoch_loss / len(train_loader), f'{save_root}/checkpoint_{epoch+1:03d}.pth')
 
 
 def train_extrinsic_diffusion(train_loader, args, device="cuda", save_root="./ckpt/extrinsic", resume=False):
@@ -71,7 +71,7 @@ def train_extrinsic_diffusion(train_loader, args, device="cuda", save_root="./ck
     
     if resume:
         ckpt_list = glob.glob(f'{save_root}/*.pth')
-        ckpt_list = ckpt_list.sort()
+        ckpt_list.sort()
         model, optimizer, start_epoch, _ = load_model(model, optimizer, ckpt_list[-1], device)
     
     model.train()
@@ -103,7 +103,7 @@ def train_extrinsic_diffusion(train_loader, args, device="cuda", save_root="./ck
         
         print(f"Epoch {epoch+1} - Avg Loss: {epoch_loss / len(train_loader):.6f}")
         if (epoch+1) % args.save_per_epoch == 0:
-            save_model(model, optimizer, epoch + 1, epoch_loss / len(train_loader), f'{save_root}/checkpoint_{epoch+1}.pth')
+            save_model(model, optimizer, epoch + 1, epoch_loss / len(train_loader), f'{save_root}/checkpoint_{epoch+1:03d}.pth')
 
 def train_decoder(train_loader, args, device="cuda", save_root="./ckpt/decoder", resume=False):
     decoder = Decoder(in_channels=3, out_channels=3, latent_channels=174).to(device)
@@ -113,7 +113,7 @@ def train_decoder(train_loader, args, device="cuda", save_root="./ckpt/decoder",
 
     if resume:
         ckpt_list = glob.glob(f'{save_root}/*.pth')
-        ckpt_list = ckpt_list.sort()
+        ckpt_list.sort()
         decoder, optimizer, start_epoch, _ = load_model(decoder, optimizer, ckpt_list[-1], device)
 
     decoder.train()
@@ -143,42 +143,82 @@ def train_decoder(train_loader, args, device="cuda", save_root="./ckpt/decoder",
 
         print(f"Epoch {epoch+1} - Avg Loss: {epoch_loss / len(train_loader):.6f}")
         if (epoch+1) % args.save_per_epoch == 0:
-            save_model(decoder, optimizer, epoch + 1, epoch_loss / len(train_loader), f'{save_root}/checkpoint_{epoch+1}.pth')
+            save_model(decoder, optimizer, epoch + 1, epoch_loss / len(train_loader), f'{save_root}/checkpoint_{epoch+1:03d}.pth')
             save_visualize_images(reconstructed_img, target_img)
 
 #----------------------------------------------------------------------------
 # Evaluation
 #----------------------------------------------------------------------------
 
-def eval(args, pretrained_model, device="cuda"):
+def part_eval(args, pretrained_model, device="cuda"):
+    print('\nstart part evalution...')
+    torch.cuda.empty_cache()
+
+    with torch.inference_mode():
+        img_transform = transforms.Compose([
+            torchvision.transforms.Resize(256),
+            torchvision.transforms.CenterCrop((256, 256)),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                        mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]
+                    ),
+        ])
+        img1 = Image.open('./datasets/miiw_train/14n_copyroom1/dir_2_mip2.jpg').convert("RGB")
+        img2 = Image.open('./datasets/miiw_train/summer_kitchen1/dir_22_mip2.jpg').convert("RGB")
+        
+        img1 = img_transform(img1).unsqueeze(0).to(device)
+        img2 = img_transform(img2).unsqueeze(0).to(device)
+
+        intrinsic, _ = get_image_intrinsic_extrinsic(pretrained_model, img1)
+        flatten_intrinsic = [tensor.flatten(start_dim=1) for tensor in intrinsic]
+        intrinsic_latent = torch.cat(flatten_intrinsic, dim=1).view(intrinsic[0].shape[0], -1, 128, 128)
+
+        _, extrinsic_latent = get_image_intrinsic_extrinsic(pretrained_model, img2)
+        extrinsic_latent = extrinsic_latent.view(extrinsic_latent.shape[0], -1, 1, 1)
+
+        # intrinsic_latent = torch.zeros(extrinsic_latent.shape[0], 110, 128, 128).to(device)
+        # extrinsic_latent = torch.randn(intrinsic[0].shape[0], 16, 1, 1).to(device)
+
+        if args.eval_mode == 'intrinsic':
+            print('evaluate intrinsic diff...')
+            intrinsic_diff = Diffusion(sample_size=128, in_channels=110).to(device)
+            intrinsic_optimizer = optim.AdamW(intrinsic_diff.parameters(), lr=args.lr)
+            intrinsic_diff, _, _, _ = load_model(intrinsic_diff, intrinsic_optimizer, save_path=args.intrinsic_path, device=device)
+
+            intrinsic_diff.eval()
+            intrinsic_latent = intrinsic_diff(torch.randn(1, 110, 128, 128).to(device), timestep=1000).sample  # [1, 110, 128, 128]
+            del intrinsic_diff
+            torch.cuda.empty_cache()
+        elif args.eval_mode == 'extrinsic':
+            print('evaluate extrinsic diff...')
+            extrinsic_diff = Diffusion(sample_size=128, in_channels=64, is_intrinsic=False).to(device)
+            extrinsic_optimizer = optim.AdamW(extrinsic_diff.parameters(), lr=args.lr)
+            extrinsic_diff, _, _, _ = load_model(extrinsic_diff, extrinsic_optimizer, save_path=args.extrinsic_path, device=device)
+            
+            extrinsic_diff.eval()
+            extrinsic_latent = extrinsic_diff(torch.randn(1, 16, 1, 1).to(device), timestep=1000)  # [1, 16, 1, 1]
+            del extrinsic_diff
+            torch.cuda.empty_cache()
+
+
+        decoder = Decoder(in_channels=3, out_channels=3, latent_channels=174).to(device)
+        decoder_optimizer = optim.AdamW(decoder.parameters(), lr=args.lr)
+        decoder, _, _, _ = load_model(decoder, decoder_optimizer, save_path=args.decoder_path, device=device)
+
+        decoder.eval()
+        output_image = decoder(intrinsic_latent, extrinsic_latent.squeeze(2).squeeze(2))  # [1, 3, 256, 256]
+
+        save_result_images(output_image, "generated_image.png")
+
+def eval(args, device="cuda"):
     print('\nstart evalution...')
     torch.cuda.empty_cache()
 
     with torch.inference_mode():
-        # img_transform = transforms.Compose([
-        #     torchvision.transforms.Resize(256),
-        #     torchvision.transforms.CenterCrop((256, 256)),
-        #     transforms.ToTensor(),
-        #     transforms.Normalize(
-        #                 mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]
-        #             ),
-        # ])
-        # img1 = Image.open('./datasets/miiw_train/14n_copyroom1/dir_2_mip2.jpg').convert("RGB")
-        # img2 = Image.open('./datasets/miiw_train/summer_kitchen1/dir_22_mip2.jpg').convert("RGB")
-        
-        # img1 = img_transform(img1).unsqueeze(0).to(device)
-        # img2 = img_transform(img2).unsqueeze(0).to(device)
-
-        # intrinsic, _ = get_image_intrinsic_extrinsic(pretrained_model, img1)
-        # _, extrinsic_latent = get_image_intrinsic_extrinsic(pretrained_model, img2)
-        # flatten_intrinsic = [tensor.flatten(start_dim=1) for tensor in intrinsic]
-        # intrinsic_latent = torch.cat(flatten_intrinsic, dim=1).view(intrinsic[0].shape[0], -1, 128, 128)
-        # extrinsic_latent = extrinsic_latent.view(extrinsic_latent.shape[0], -1, 1, 1)
-
         # intrinsic diffusion
         intrinsic_diff = Diffusion(sample_size=128, in_channels=110).to(device)
         intrinsic_optimizer = optim.AdamW(intrinsic_diff.parameters(), lr=args.lr)
-        intrinsic_diff, _, _, _ = load_model(intrinsic_diff, intrinsic_optimizer, save_path=f'{args.intrinsic_ckpt_root}/checkpoint_1.pth', device=device)
+        intrinsic_diff, _, _, _ = load_model(intrinsic_diff, intrinsic_optimizer, save_path=args.intrinsic_path, device=device)
 
         intrinsic_diff.eval()
         intrinsic_latent = intrinsic_diff(torch.randn(1, 110, 128, 128).to(device), timestep=1000).sample  # [1, 110, 128, 128]
@@ -188,7 +228,7 @@ def eval(args, pretrained_model, device="cuda"):
         # extrinsic diffusion
         extrinsic_diff = Diffusion(sample_size=128, in_channels=64, is_intrinsic=False).to(device)
         extrinsic_optimizer = optim.AdamW(extrinsic_diff.parameters(), lr=args.lr)
-        extrinsic_diff, _, _, _ = load_model(extrinsic_diff, extrinsic_optimizer, save_path=f'{args.extrinsic_ckpt_root}/checkpoint_1.pth', device=device)
+        extrinsic_diff, _, _, _ = load_model(extrinsic_diff, extrinsic_optimizer, save_path=args.extrinsic_path, device=device)
         
         extrinsic_diff.eval()
         extrinsic_latent = extrinsic_diff(torch.randn(1, 16, 1, 1).to(device), timestep=1000)  # [1, 16, 1, 1]
@@ -198,7 +238,7 @@ def eval(args, pretrained_model, device="cuda"):
         # decoder
         decoder = Decoder(in_channels=3, out_channels=3, latent_channels=174).to(device)
         decoder_optimizer = optim.AdamW(decoder.parameters(), lr=args.lr)
-        decoder, _, _, _ = load_model(decoder, decoder_optimizer, save_path=f'{args.decoder_ckpt_root}/checkpoint_1.pth', device=device)
+        decoder, _, _, _ = load_model(decoder, decoder_optimizer, save_path=args.decoder_path, device=device)
 
         decoder.eval()
         output_image = decoder(intrinsic_latent, extrinsic_latent.squeeze(2).squeeze(2))  # [1, 3, 256, 256]
@@ -224,7 +264,6 @@ def get_image_intrinsic_extrinsic(model, img):
     return intrinsic, extrinsic
 
 def load_latent_intrinsic(path, device):
-    # initialize
     dist.init_process_group(backend='nccl', init_method='env://', world_size=1, rank=0)
 
     model = UNet(img_resolution = 256, in_channels = 3, out_channels = 3,
@@ -236,6 +275,27 @@ def load_latent_intrinsic(path, device):
     # load pretrained latent intrinsic model
     print(f"=> loading checkpoint '{path}'...")
     checkpoint = torch.load(path, map_location=f'cuda:{device}')
+    model.load_state_dict(checkpoint['state_dict'])
+    print('=> finished.')
+
+    return model
+
+def load_latent_intrinsic_multi(path):
+    if not dist.is_initialized():
+        dist.init_process_group(backend='nccl', init_method='env://')
+
+    local_rank = int(os.environ["LOCAL_RANK"])  # 取得 local rank
+    torch.cuda.set_device(local_rank)  # 設定每個進程對應的 GPU
+
+    model = UNet(img_resolution = 256, in_channels = 3, out_channels = 3,
+                     num_blocks_list = [1, 2, 2, 4, 4, 4], attn_resolutions = [0], model_channels = 32,
+                     channel_mult = [1, 2, 4, 4, 8, 16], affine_scale = float(5e-3))
+    model.to(local_rank)
+    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], find_unused_parameters=True, broadcast_buffers=False)
+
+    # load pretrained latent intrinsic model
+    print(f"=> loading checkpoint '{path}' on GPU {local_rank}...")
+    checkpoint = torch.load(path, map_location=f'cuda:{local_rank}')
     model.load_state_dict(checkpoint['state_dict'])
     print('=> finished.')
 
@@ -261,3 +321,37 @@ def save_model(model, optimizer, epoch, loss, save_path="diffusion_checkpoint.pt
         'loss': loss,
     }, save_path)
     print('=> finished.')
+
+def save_visualize_images(rec_img, tar_img):
+    def tensor_to_image(tensor):
+        """Convert a tensor to a NumPy image array."""
+        img = (tensor.clamp(-1, 1) * 0.5 + 0.5).permute(0, 2, 3, 1).cpu().data.numpy() * 255
+        return img.astype(np.uint8)
+
+    # Convert tensors to images
+    rec_np = tensor_to_image(rec_img)
+    tar_np = tensor_to_image(tar_img)
+
+    # Concatenate along batch dimension (vertical stacking)
+    for i, (rec, tar) in enumerate(zip(rec_np, tar_np)):
+        concatenated_image = np.concatenate((rec, tar), axis=1)
+        img = Image.fromarray(concatenated_image)
+
+        # Save the concatenated image
+        path = f"./visualize/epoch_{i}.png"
+        print(f'=> saving image to {path}...')
+        img.save(path)
+
+def save_result_images(img_tensor, path):
+    def tensor_to_image(tensor):
+        """Convert a tensor to a NumPy image array."""
+        tensor = tensor.squeeze(0)
+        tensor = (tensor.clamp(-1, 1) + 1) / 2  # Normalize to [0, 1]
+        tensor = tensor.permute(1, 2, 0).cpu().numpy() * 255  # Convert to HWC format
+        return tensor.astype(np.uint8)
+
+    img_np = tensor_to_image(img_tensor)
+
+    img = Image.fromarray(img_np)
+    print(f"=> Saving image to {path}...")
+    img.save(path)

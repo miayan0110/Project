@@ -1,5 +1,6 @@
 import argparse
 import os
+import glob
 from torch.utils.data import DataLoader
 
 from models import *
@@ -21,6 +22,7 @@ def get_args():
     parser.add_argument('--num_epochs', default=50, type=int)   # training number of epochs
     parser.add_argument('--num_train_timesteps', default=1000, type=int)   # training number of timesteps
     parser.add_argument('--resume', action='store_true')    # whether keep training the previous model or not
+    parser.add_argument('--eval_mode', default='all', type=str)    # which model to evaluate ('all', 'intrinsic', 'extrinsic', 'decoder')
 
     parser.add_argument("--local-rank", default=0, type=int)
     args = parser.parse_args()
@@ -28,14 +30,23 @@ def get_args():
 
 
 def main(args):
-    # dataset = StyLitGAN_Dataset(args.data_path)
-    pretrained_model = load_latent_intrinsic(args.latent_intrinsic_weight, args.gpu_id)
-    diff_dataloader = DataLoader(MIIWDataset(pretrained_model, args), batch_size=args.batch_size, shuffle=True)
+    intrinsic_list = glob.glob(f'{args.intrinsic_ckpt_root}/*.pth')
+    intrinsic_list.sort()
+    args.intrinsic_path = intrinsic_list[-1]
 
-    train_intrinsic_diffusion(diff_dataloader, args, device=f'cuda:{args.gpu_id}', save_root=args.intrinsic_ckpt_root, resume=False)
+    extrinsic_list = glob.glob(f'{args.extrinsic_ckpt_root}/*.pth')
+    extrinsic_list.sort()
+    args.extrinsic_path = extrinsic_list[-1]
 
-    # eval(args, device=f'cuda:{args.gpu_id}')    
-    # eval(args, pretrained_model, device=f'cuda:{args.gpu_id}')    
+    decoder_list = glob.glob(f'{args.decoder_ckpt_root}/*.pth')
+    decoder_list.sort()
+    args.decoder_path = decoder_list[-1]
+
+    if args.eval_mode == 'all':
+        eval(args, device=f'cuda:{args.gpu_id}')
+    else: 
+        pretrained_model = load_latent_intrinsic(args.latent_intrinsic_weight, args.gpu_id)
+        part_eval(args, pretrained_model, device=f'cuda:{args.gpu_id}')    
 
 
 if __name__ == '__main__':
