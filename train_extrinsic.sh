@@ -16,7 +16,7 @@ echo "MASTER_ADDR="$MASTER_ADDR
 
 python -m torch.distributed.launch \
 --nproc_per_node=1 --master_port=${port} train_extrinsic.py \
---gpu_id 1 \
+--gpu_id 6 \
 --data_path ./datasets/miiw_train/train \
 --save_per_epoch 5 \
 --batch_size 8 \

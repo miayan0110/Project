@@ -22,7 +22,7 @@ python -m torch.distributed.launch \
 --batch_size 8 \
 --num_epochs 100 \
 --resume \
---eval_mode intrinsic \
+--eval_mode decoderd \
 
 # gpu id | real id
 #    0   |    2
