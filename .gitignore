@@ -1,0 +1,6 @@
+*.pth
+*.png
+*.jpg
+datasets/*
+ckpt/*
+pretrained_weight/*
