@@ -48,8 +48,8 @@ def train_intrinsic_diffusion(train_loader, args, device="cuda", save_root="./ck
             noisy_inputs = noise_scheduler.add_noise(inputs, noise, timesteps)
             
             # print(f'noisy_inputs.shape: {noisy_inputs.shape}, timesteps.shape: {timesteps.shape}')
-            outputs = model(noisy_inputs, timesteps).sample
-            loss = criterion(outputs, inputs)
+            pred_noise = model(noisy_inputs, timesteps).sample
+            loss = criterion(pred_noise, noise)
             
             loss.backward()
             optimizer.step()
@@ -92,8 +92,8 @@ def train_extrinsic_diffusion(train_loader, args, device="cuda", save_root="./ck
             noisy_inputs = noise_scheduler.add_noise(inputs, noise, timesteps)
             
             # print(f'noisy_inputs.shape: {noisy_inputs.shape}, timesteps.shape: {timesteps.shape}')
-            outputs = model(noisy_inputs, timesteps)
-            loss = criterion(outputs, inputs)
+            pred_noise = model(noisy_inputs, timesteps)
+            loss = criterion(pred_noise, noise)
             
             loss.backward()
             optimizer.step()
@@ -163,17 +163,17 @@ def part_eval(args, pretrained_model, device="cuda"):
                         mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]
                     ),
         ])
-        img1 = Image.open('./datasets/miiw_train/14n_copyroom1/dir_2_mip2.jpg').convert("RGB")
-        img2 = Image.open('./datasets/miiw_train/summer_kitchen1/dir_22_mip2.jpg').convert("RGB")
+        in_img = Image.open('./datasets/my_data/ori_0.jpg').convert("RGB")
+        ex_img = Image.open('./datasets/my_data/ref_0.jpg').convert("RGB")
         
-        img1 = img_transform(img1).unsqueeze(0).to(device)
-        img2 = img_transform(img2).unsqueeze(0).to(device)
+        in_img = img_transform(in_img).unsqueeze(0).to(device)
+        ex_img = img_transform(ex_img).unsqueeze(0).to(device)
 
-        intrinsic, _ = get_image_intrinsic_extrinsic(pretrained_model, img1)
+        intrinsic, _ = get_image_intrinsic_extrinsic(pretrained_model, in_img)
         flatten_intrinsic = [tensor.flatten(start_dim=1) for tensor in intrinsic]
         intrinsic_latent = torch.cat(flatten_intrinsic, dim=1).view(intrinsic[0].shape[0], -1, 128, 128)
 
-        _, extrinsic_latent = get_image_intrinsic_extrinsic(pretrained_model, img2)
+        _, extrinsic_latent = get_image_intrinsic_extrinsic(pretrained_model, ex_img)
         extrinsic_latent = extrinsic_latent.view(extrinsic_latent.shape[0], -1, 1, 1)
 
         # intrinsic_latent = torch.zeros(extrinsic_latent.shape[0], 110, 128, 128).to(device)
@@ -181,6 +181,7 @@ def part_eval(args, pretrained_model, device="cuda"):
 
         if args.eval_mode == 'intrinsic':
             print('evaluate intrinsic diff...')
+            save_result_images(ex_img, f'{args.eval_result_save_root}/light.jpg')
             intrinsic_diff = Diffusion(sample_size=128, in_channels=110).to(device)
             intrinsic_optimizer = optim.AdamW(intrinsic_diff.parameters(), lr=args.lr)
             intrinsic_diff, _, _, _ = load_model(intrinsic_diff, intrinsic_optimizer, save_path=args.intrinsic_path, device=device)
@@ -191,6 +192,7 @@ def part_eval(args, pretrained_model, device="cuda"):
             torch.cuda.empty_cache()
         elif args.eval_mode == 'extrinsic':
             print('evaluate extrinsic diff...')
+            save_result_images(in_img, f'{args.eval_result_save_root}/scene.jpg')
             extrinsic_diff = Diffusion(sample_size=128, in_channels=64, is_intrinsic=False).to(device)
             extrinsic_optimizer = optim.AdamW(extrinsic_diff.parameters(), lr=args.lr)
             extrinsic_diff, _, _, _ = load_model(extrinsic_diff, extrinsic_optimizer, save_path=args.extrinsic_path, device=device)
@@ -199,7 +201,9 @@ def part_eval(args, pretrained_model, device="cuda"):
             extrinsic_latent = extrinsic_diff(torch.randn(1, 16, 1, 1).to(device), timestep=1000)  # [1, 16, 1, 1]
             del extrinsic_diff
             torch.cuda.empty_cache()
-
+        else:
+            save_result_images(in_img, f'{args.eval_result_save_root}/scene.jpg')
+            save_result_images(ex_img, f'{args.eval_result_save_root}/light.jpg')
 
         decoder = Decoder(in_channels=3, out_channels=3, latent_channels=174).to(device)
         decoder_optimizer = optim.AdamW(decoder.parameters(), lr=args.lr)
@@ -208,7 +212,7 @@ def part_eval(args, pretrained_model, device="cuda"):
         decoder.eval()
         output_image = decoder(intrinsic_latent, extrinsic_latent.squeeze(2).squeeze(2))  # [1, 3, 256, 256]
 
-        save_result_images(output_image, "generated_image.png")
+        save_result_images(output_image, f'{args.eval_result_save_root}/result.jpg')
 
 def eval(args, device="cuda"):
     print('\nstart evalution...')
@@ -243,7 +247,7 @@ def eval(args, device="cuda"):
         decoder.eval()
         output_image = decoder(intrinsic_latent, extrinsic_latent.squeeze(2).squeeze(2))  # [1, 3, 256, 256]
 
-        save_result_images(output_image, "generated_image.png")
+        save_result_images(output_image, f'{args.eval_result_save_root}/result.jpg')
 
 #----------------------------------------------------------------------------
 # Utils

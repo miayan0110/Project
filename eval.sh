@@ -16,13 +16,9 @@ echo "MASTER_ADDR="$MASTER_ADDR
 
 python -m torch.distributed.launch \
 --nproc_per_node=1 --master_port=${port} eval.py \
---gpu_id 6 \
---data_path ./datasets/miiw_train/train \
---save_per_epoch 5 \
---batch_size 8 \
---num_epochs 100 \
---resume \
---eval_mode decoderd \
+--gpu_id 1 \
+--eval_mode decoder \
+--eval_result_save_root 1_de \
 
 # gpu id | real id
 #    0   |    2

@@ -4,3 +4,4 @@
 datasets/*
 ckpt/*
 pretrained_weight/*
+__pycache__/*

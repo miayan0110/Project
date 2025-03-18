@@ -24,6 +24,8 @@ def get_args():
     parser.add_argument('--resume', action='store_true')    # whether keep training the previous model or not
     parser.add_argument('--eval_mode', default='all', type=str)    # which model to evaluate ('all', 'intrinsic', 'extrinsic', 'decoder')
 
+    parser.add_argument('--eval_result_save_root', default='0', type=str)    # which model to evaluate ('all', 'intrinsic', 'extrinsic', 'decoder')
+
     parser.add_argument("--local-rank", default=0, type=int)
     args = parser.parse_args()
     return args
@@ -43,8 +45,12 @@ def main(args):
     args.decoder_path = decoder_list[-1]
 
     if args.eval_mode == 'all':
+        args.eval_result_save_root = f'./eval_result/all/{args.eval_result_save_root}'
+        os.makedirs(args.eval_result_save_root, exist_ok=True)
         eval(args, device=f'cuda:{args.gpu_id}')
-    else: 
+    else:
+        args.eval_result_save_root = f'./eval_result/part/{args.eval_result_save_root}'
+        os.makedirs(args.eval_result_save_root, exist_ok=True)
         pretrained_model = load_latent_intrinsic(args.latent_intrinsic_weight, args.gpu_id)
         part_eval(args, pretrained_model, device=f'cuda:{args.gpu_id}')    
 
@@ -54,5 +60,4 @@ if __name__ == '__main__':
     os.makedirs(args.intrinsic_ckpt_root, exist_ok=True)
     os.makedirs(args.extrinsic_ckpt_root, exist_ok=True)
     os.makedirs(args.decoder_ckpt_root, exist_ok=True)
-    os.makedirs('./visualize', exist_ok=True)
     main(args)
