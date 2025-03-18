@@ -19,7 +19,6 @@ class MIIWDataset(Dataset):
         self.img_list = glob.glob(args.data_path + '/*.jpg')
         self.img_list.sort()
         print(f'=> initializng MIIWDataset... total count: {len(self.img_list)}')
-        # self.img_transform = transforms.ToTensor()
         self.img_transform = transforms.Compose([
         torchvision.transforms.Resize(256),
         torchvision.transforms.CenterCrop((256, 256)),
@@ -30,23 +29,9 @@ class MIIWDataset(Dataset):
     ])
 
     def __len__(self):
-        # return len(self.img_list) // 2
         return len(self.img_list)
 
     def __getitem__(self, idx):
-        # idx *= 2
-        # lighting_path = self.img_list[idx]
-        # content_path = self.img_list[idx+1]
-        # print(f'lighting image path: {lighting_path}, content image path: {content_path}')
-
-        # content_image = Image.open(content_path).convert("RGB")
-        # lighting_image = Image.open(lighting_path).convert("RGB")
-
-        # content_tensor = self.img_transform(content_image)
-        # lighting_tensor = self.img_transform(lighting_image)
-
-        # return content_tensor, lighting_tensor
-
         img_path = self.img_list[idx]
         # print(f'image path: {img_path}')
         img = Image.open(img_path).convert("RGB")

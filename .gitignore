@@ -5,3 +5,4 @@ datasets/*
 ckpt/*
 pretrained_weight/*
 __pycache__/*
+gpu.py
