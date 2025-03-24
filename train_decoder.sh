@@ -16,12 +16,12 @@ echo "MASTER_ADDR="$MASTER_ADDR
 
 python -m torch.distributed.launch \
 --nproc_per_node=1 --master_port=${port} train_decoder.py \
---gpu_id 4 \
---data_path ./datasets/miiw_train/train \
+--gpu_id 7 \
+--data_path ./datasets/stylitgan_train \
 --save_per_epoch 2 \
---batch_size 8 \
---num_epochs 50 \
---resume \
+--batch_size 4 \
+--num_epochs 200 \
+# --resume \
 
 # gpu id | real id
 #    0   |    2

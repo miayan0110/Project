@@ -20,8 +20,8 @@ python -m torch.distributed.launch \
 --data_path ./datasets/miiw_train/train \
 --save_per_epoch 5 \
 --batch_size 8 \
---num_epochs 100 \
-# --resume \
+--num_epochs 200 \
+--resume \
 
 # gpu id | real id
 #    0   |    2

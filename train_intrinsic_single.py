@@ -43,5 +43,4 @@ if __name__ == '__main__':
     os.makedirs(args.intrinsic_ckpt_root, exist_ok=True)
     os.makedirs(args.extrinsic_ckpt_root, exist_ok=True)
     os.makedirs(args.decoder_ckpt_root, exist_ok=True)
-    os.makedirs('./visualize', exist_ok=True)
     main(args)

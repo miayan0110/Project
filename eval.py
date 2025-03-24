@@ -35,14 +35,17 @@ def main(args):
     intrinsic_list = glob.glob(f'{args.intrinsic_ckpt_root}/*.pth')
     intrinsic_list.sort()
     args.intrinsic_path = intrinsic_list[-1]
+    # args.intrinsic_path = './ckpt/intrinsic/checkpoint_075.pth'
 
     extrinsic_list = glob.glob(f'{args.extrinsic_ckpt_root}/*.pth')
     extrinsic_list.sort()
     args.extrinsic_path = extrinsic_list[-1]
+    # args.extrinsic_path = './ckpt/extrinsic/checkpoint_075.pth'
 
     decoder_list = glob.glob(f'{args.decoder_ckpt_root}/*.pth')
     decoder_list.sort()
     args.decoder_path = decoder_list[-1]
+    # args.decoder_path = './ckpt/decoder/checkpoint_024.pth'
 
     if args.eval_mode == 'all':
         args.eval_result_save_root = f'./eval_result/all/{args.eval_result_save_root}'

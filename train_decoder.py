@@ -28,9 +28,11 @@ def get_args():
 
 
 def main(args):
-    # dataset = StyLitGAN_Dataset(args.data_path)
     pretrained_model = load_latent_intrinsic(args.latent_intrinsic_weight, args.gpu_id)
-    decoder_dataloader = DataLoader(MIIWDataset(pretrained_model, args, for_decoder=True), batch_size=args.batch_size, shuffle=True)
+    
+    dataset = StyLitGAN_Dataset(pretrained_model, args, for_decoder=True)
+    # dataset = MIIWDataset(pretrained_model, args, for_decoder=True)
+    decoder_dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
 
     train_decoder(decoder_dataloader, args, device=f'cuda:{args.gpu_id}', save_root=args.decoder_ckpt_root, resume=args.resume)
 
@@ -43,5 +45,4 @@ if __name__ == '__main__':
     os.makedirs(args.intrinsic_ckpt_root, exist_ok=True)
     os.makedirs(args.extrinsic_ckpt_root, exist_ok=True)
     os.makedirs(args.decoder_ckpt_root, exist_ok=True)
-    os.makedirs('./visualize', exist_ok=True)
     main(args)

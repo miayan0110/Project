@@ -62,7 +62,6 @@ class Decoder(nn.Module):
             )
 
     def forward(self, intrinsic, extrinsic):
-        extrinsic = extrinsic.view(extrinsic.shape[0], -1, 1, 1)    # [batch, 16, 1, 1]
         extrinsic = self.upsample(extrinsic)    # [batch, 64, 128, 128]
         feature = torch.cat([intrinsic, extrinsic], dim=1)  # [batch, 174, 128, 128]
         x = self.decoder(feature)     # [batch, 3, 256, 256]

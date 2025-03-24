@@ -12,14 +12,27 @@ from tqdm import tqdm
 from PIL import Image
 import numpy as np
 
+from torch.utils.tensorboard import SummaryWriter
+
 from models import *
 from unets import UNet
+
+#----------------------------------------------------------------------------
+# Tensorboard
+#----------------------------------------------------------------------------
+
+logdir = './records'
+os.makedirs(logdir, exist_ok=True)
 
 #----------------------------------------------------------------------------
 # Training
 #----------------------------------------------------------------------------
 
 def train_intrinsic_diffusion(train_loader, args, device="cuda", save_root="./ckpt/intrinsic", resume=False):
+    log_subdir = f'{logdir}/intrinsic_loss'
+    os.makedirs(log_subdir, exist_ok=True)
+    writer = SummaryWriter(log_subdir)
+
     model = Diffusion(sample_size=128, in_channels=110).to(device)
     optimizer = optim.AdamW(model.parameters(), lr=args.lr)
     noise_scheduler = DDPMScheduler(num_train_timesteps=args.num_train_timesteps)
@@ -47,7 +60,6 @@ def train_intrinsic_diffusion(train_loader, args, device="cuda", save_root="./ck
 
             noisy_inputs = noise_scheduler.add_noise(inputs, noise, timesteps)
             
-            # print(f'noisy_inputs.shape: {noisy_inputs.shape}, timesteps.shape: {timesteps.shape}')
             pred_noise = model(noisy_inputs, timesteps).sample
             loss = criterion(pred_noise, noise)
             
@@ -58,11 +70,16 @@ def train_intrinsic_diffusion(train_loader, args, device="cuda", save_root="./ck
             pbar.set_postfix(loss=loss.item())
         
         print(f"Epoch {epoch+1} - Avg Loss: {epoch_loss / len(train_loader):.6f}")
+        writer.add_scalar('Intrinsic Loss', epoch_loss / len(train_loader), epoch+1)
         if (epoch+1) % args.save_per_epoch == 0:
             save_model(model, optimizer, epoch + 1, epoch_loss / len(train_loader), f'{save_root}/checkpoint_{epoch+1:03d}.pth')
 
 
 def train_extrinsic_diffusion(train_loader, args, device="cuda", save_root="./ckpt/extrinsic", resume=False):
+    log_subdir = f'{logdir}/extrinsic_loss'
+    os.makedirs(log_subdir, exist_ok=True)
+    writer = SummaryWriter(log_subdir)
+
     model = Diffusion(sample_size=128, in_channels=64, is_intrinsic=False).to(device)
     optimizer = optim.AdamW(model.parameters(), lr=args.lr)
     noise_scheduler = DDPMScheduler(num_train_timesteps=args.num_train_timesteps)
@@ -91,7 +108,6 @@ def train_extrinsic_diffusion(train_loader, args, device="cuda", save_root="./ck
             timesteps = torch.randint(0, noise_scheduler.num_train_timesteps, (inputs.shape[0],), device=device)
             noisy_inputs = noise_scheduler.add_noise(inputs, noise, timesteps)
             
-            # print(f'noisy_inputs.shape: {noisy_inputs.shape}, timesteps.shape: {timesteps.shape}')
             pred_noise = model(noisy_inputs, timesteps)
             loss = criterion(pred_noise, noise)
             
@@ -102,10 +118,15 @@ def train_extrinsic_diffusion(train_loader, args, device="cuda", save_root="./ck
             pbar.set_postfix(loss=loss.item())
         
         print(f"Epoch {epoch+1} - Avg Loss: {epoch_loss / len(train_loader):.6f}")
+        writer.add_scalar('Extrinsic Loss', epoch_loss / len(train_loader), epoch+1)
         if (epoch+1) % args.save_per_epoch == 0:
             save_model(model, optimizer, epoch + 1, epoch_loss / len(train_loader), f'{save_root}/checkpoint_{epoch+1:03d}.pth')
 
 def train_decoder(train_loader, args, device="cuda", save_root="./ckpt/decoder", resume=False):
+    log_subdir = f'{logdir}/decoder_loss'
+    os.makedirs(log_subdir, exist_ok=True)
+    writer = SummaryWriter(log_subdir)
+
     decoder = Decoder(in_channels=3, out_channels=3, latent_channels=174).to(device)
     optimizer = optim.AdamW(decoder.parameters(), lr=args.lr)
     criterion = nn.MSELoss()
@@ -123,18 +144,23 @@ def train_decoder(train_loader, args, device="cuda", save_root="./ckpt/decoder",
         pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{args.num_epochs}")
 
         for batch in pbar:
-            target_img, intrinsic, extrinsic = batch
-            target_img = target_img.squeeze(1).to(device)          # target_img.shape: [batch, C, H, W]
-            intrinsic = intrinsic.squeeze(1).to(device) # intrinsic.shape: [batch, 110, 128, 128]
-            extrinsic = extrinsic.to(device)            # extrinsic.shape: [batch, 16]
+            scene_img, light_img, scene_intrinsic, scene_extrinsic, light_extrinsic = batch
+            scene_img = scene_img.squeeze(1).to(device)          # scene_img.shape: [batch, C, H, W]
+            light_img = light_img.squeeze(1).to(device)          # light_img.shape: [batch, C, H, W]
+            scene_intrinsic = scene_intrinsic.squeeze(1).to(device) # intrinsic.shape: [batch, 110, 128, 128]
+            scene_extrinsic = scene_extrinsic.to(device)            # extrinsic.shape: [batch, 16]
+            scene_extrinsic = scene_extrinsic.view(scene_extrinsic.shape[0], -1, 1, 1)    # extrinsic.shape: [batch, 16, 1, 1]
+            light_extrinsic = light_extrinsic.to(device)            # extrinsic.shape: [batch, 16]
+            light_extrinsic = light_extrinsic.view(light_extrinsic.shape[0], -1, 1, 1)    # extrinsic.shape: [batch, 16, 1, 1]
 
             optimizer.zero_grad()
             
             # Pass latent representation through decoder
-            reconstructed_img = decoder(intrinsic, extrinsic)  # Output shape: [batch, C, H, W]
+            reconstructed_img = decoder(scene_intrinsic, scene_extrinsic)  # Output shape: [batch, C, H, W]
+            relighted_img = decoder(scene_intrinsic, light_extrinsic)  # Output shape: [batch, C, H, W]
 
-            # Compute loss
-            loss = criterion(reconstructed_img, target_img)
+            # Compute loss: reconstruct loss + relight loss
+            loss = criterion(reconstructed_img, scene_img) + criterion(relighted_img, light_img)
             loss.backward()
             optimizer.step()
 
@@ -142,9 +168,10 @@ def train_decoder(train_loader, args, device="cuda", save_root="./ckpt/decoder",
             pbar.set_postfix(loss=loss.item())
 
         print(f"Epoch {epoch+1} - Avg Loss: {epoch_loss / len(train_loader):.6f}")
+        writer.add_scalar('Decoder Loss', epoch_loss / len(train_loader), epoch+1)
         if (epoch+1) % args.save_per_epoch == 0:
             save_model(decoder, optimizer, epoch + 1, epoch_loss / len(train_loader), f'{save_root}/checkpoint_{epoch+1:03d}.pth')
-            save_visualize_images(reconstructed_img, target_img)
+
 
 #----------------------------------------------------------------------------
 # Evaluation
@@ -159,25 +186,20 @@ def part_eval(args, pretrained_model, device="cuda"):
             torchvision.transforms.Resize(256),
             torchvision.transforms.CenterCrop((256, 256)),
             transforms.ToTensor(),
-            transforms.Normalize(
-                        mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]
-                    ),
+            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
         ])
-        in_img = Image.open('./datasets/my_data/ori_0.jpg').convert("RGB")
-        ex_img = Image.open('./datasets/my_data/ref_0.jpg').convert("RGB")
+        in_img = Image.open('./datasets/my_data/ori_1.jpg').convert("RGB")
+        ex_img = Image.open('./datasets/my_data/ref_1.jpg').convert("RGB")
+        # in_img = Image.open('./datasets/stylitgan_train/0_0.jpg').convert("RGB")
+        # ex_img = Image.open('./datasets/stylitgan_train/0_7.jpg').convert("RGB")
         
         in_img = img_transform(in_img).unsqueeze(0).to(device)
         ex_img = img_transform(ex_img).unsqueeze(0).to(device)
 
-        intrinsic, _ = get_image_intrinsic_extrinsic(pretrained_model, in_img)
-        flatten_intrinsic = [tensor.flatten(start_dim=1) for tensor in intrinsic]
-        intrinsic_latent = torch.cat(flatten_intrinsic, dim=1).view(intrinsic[0].shape[0], -1, 128, 128)
+        intrinsic_latent, _ = get_image_intrinsic_extrinsic(pretrained_model, in_img)
 
         _, extrinsic_latent = get_image_intrinsic_extrinsic(pretrained_model, ex_img)
         extrinsic_latent = extrinsic_latent.view(extrinsic_latent.shape[0], -1, 1, 1)
-
-        # intrinsic_latent = torch.zeros(extrinsic_latent.shape[0], 110, 128, 128).to(device)
-        # extrinsic_latent = torch.randn(intrinsic[0].shape[0], 16, 1, 1).to(device)
 
         if args.eval_mode == 'intrinsic':
             print('evaluate intrinsic diff...')
@@ -210,7 +232,7 @@ def part_eval(args, pretrained_model, device="cuda"):
         decoder, _, _, _ = load_model(decoder, decoder_optimizer, save_path=args.decoder_path, device=device)
 
         decoder.eval()
-        output_image = decoder(intrinsic_latent, extrinsic_latent.squeeze(2).squeeze(2))  # [1, 3, 256, 256]
+        output_image = decoder(intrinsic_latent, extrinsic_latent)  # [1, 3, 256, 256]
 
         save_result_images(output_image, f'{args.eval_result_save_root}/result.jpg')
 
@@ -245,7 +267,7 @@ def eval(args, device="cuda"):
         decoder, _, _, _ = load_model(decoder, decoder_optimizer, save_path=args.decoder_path, device=device)
 
         decoder.eval()
-        output_image = decoder(intrinsic_latent, extrinsic_latent.squeeze(2).squeeze(2))  # [1, 3, 256, 256]
+        output_image = decoder(intrinsic_latent, extrinsic_latent)  # [1, 3, 256, 256]
 
         save_result_images(output_image, f'{args.eval_result_save_root}/result.jpg')
 
@@ -265,7 +287,10 @@ def get_image_intrinsic_extrinsic(model, img):
     noisy_img = img + noise * sigma
 
     intrinsic, extrinsic = model(img, run_encoder = True)
-    return intrinsic, extrinsic
+
+    flatten_intrinsic = [tensor.flatten(start_dim=1) for tensor in intrinsic]
+    cat_intrinsic = torch.cat(flatten_intrinsic, dim=1).view(intrinsic[0].shape[0], -1, 128, 128)    # shape: [batch, 1, 110, 128, 128]
+    return cat_intrinsic, extrinsic
 
 def load_latent_intrinsic(path, device):
     dist.init_process_group(backend='nccl', init_method='env://', world_size=1, rank=0)
