@@ -21,6 +21,7 @@ def get_args():
     parser.add_argument('--batch_size', default=8, type=int)   # batch size
     parser.add_argument('--num_epochs', default=50, type=int)   # training number of epochs
     parser.add_argument('--num_train_timesteps', default=1000, type=int)   # training number of timesteps
+    parser.add_argument('--resize_size', default=256, type=int)   # resize size
     parser.add_argument('--resume', action='store_true')    # whether keep training the previous model or not
     parser.add_argument('--eval_mode', default='all', type=str)    # which model to evaluate ('all', 'intrinsic', 'extrinsic', 'decoder')
 
@@ -35,12 +36,12 @@ def main(args):
     intrinsic_list = glob.glob(f'{args.intrinsic_ckpt_root}/*.pth')
     intrinsic_list.sort()
     args.intrinsic_path = intrinsic_list[-1]
-    # args.intrinsic_path = './ckpt/intrinsic/checkpoint_075.pth'
+    args.intrinsic_path = './ckpt/intrinsic/checkpoint_050.pth'
 
     extrinsic_list = glob.glob(f'{args.extrinsic_ckpt_root}/*.pth')
     extrinsic_list.sort()
     args.extrinsic_path = extrinsic_list[-1]
-    # args.extrinsic_path = './ckpt/extrinsic/checkpoint_075.pth'
+    args.extrinsic_path = './ckpt/extrinsic/checkpoint_050.pth'
 
     decoder_list = glob.glob(f'{args.decoder_ckpt_root}/*.pth')
     decoder_list.sort()

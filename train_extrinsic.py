@@ -20,6 +20,7 @@ def get_args():
     parser.add_argument('--batch_size', default=8, type=int)   # batch size
     parser.add_argument('--num_epochs', default=50, type=int)   # training number of epochs
     parser.add_argument('--num_train_timesteps', default=1000, type=int)   # training number of timesteps
+    parser.add_argument('--resize_size', default=64, type=int)   # resize size
     parser.add_argument('--resume', action='store_true')    # whether keep training the previous model or not
 
     parser.add_argument("--local-rank", default=0, type=int)
@@ -28,9 +29,11 @@ def get_args():
 
 
 def main(args):
-    # dataset = StyLitGAN_Dataset(pretrained_model, args)
     pretrained_model = load_latent_intrinsic(args.latent_intrinsic_weight, args.gpu_id)
-    diff_dataloader = DataLoader(MIIWDataset(pretrained_model, args), batch_size=args.batch_size, shuffle=True)
+    
+    dataset = StyLitGAN_Dataset(pretrained_model, args)
+    # dataset = MIIWDataset(pretrained_model, args)
+    diff_dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
 
     train_extrinsic_diffusion(diff_dataloader, args, device=f'cuda:{args.gpu_id}', save_root=args.extrinsic_ckpt_root, resume=args.resume)
 

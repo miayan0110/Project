@@ -7,14 +7,6 @@ from torchvision import transforms
 
 from model_utils import *
 
-
-img_transform = transforms.Compose([
-    torchvision.transforms.Resize(256),
-    torchvision.transforms.CenterCrop((256, 256)),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
-])
-
 #----------------------------------------------------------------------------
 # Dataset
 #----------------------------------------------------------------------------
@@ -24,7 +16,8 @@ class MIIWDataset(Dataset):
         self.for_decoder = for_decoder
         self.device = f'cuda:{args.gpu_id}'
         self.model = model
-        self.img_transform = img_transform
+        self.img_transform = preprocess(args.resize_size)
+        self.resize_size = args.resize_size
         self.img_list = glob.glob(args.data_path + '/*.jpg')
         self.img_list.sort()
         print(f'=> initializng MIIWDataset... total count: {len(self.img_list)}')
@@ -37,7 +30,7 @@ class MIIWDataset(Dataset):
         img = Image.open(img_path).convert("RGB")
         img = self.img_transform(img).unsqueeze(0).to(self.device)
 
-        cat_intrinsic, extrinsic = get_image_intrinsic_extrinsic(self.model, img)
+        cat_intrinsic, extrinsic = get_image_intrinsic_extrinsic(self.model, img, self.resize_size)
 
         if self.for_decoder:
             return img, cat_intrinsic, extrinsic
@@ -45,35 +38,60 @@ class MIIWDataset(Dataset):
             return cat_intrinsic, extrinsic
 
 class StyLitGAN_Dataset(Dataset):
-    # 先確認styltigan提供的data有多少：7000筆
     def __init__(self, model, args, for_decoder=False):
         self.for_decoder = for_decoder
         self.device = f'cuda:{args.gpu_id}'
         self.data_root = args.data_path
         self.model = model
-        self.img_transform = img_transform
+        self.img_transform = preprocess(args.resize_size)
+        self.resize_size = args.resize_size
 
         self.img_list = glob.glob(args.data_path + '/*.jpg')
-        print(f'=> initializng StyLitGAN Dataset... total count: {int(len(self.img_list) * 7 / 8)}')
+        
+        self.len = len(self.img_list)
+        if self.for_decoder:
+            self.len = int(len(self.img_list) * 7 / 8)
+
+        print(f'=> initializng StyLitGAN Dataset... total count: {self.len}')
 
     def __len__(self):
-        return int(len(self.img_list) * 7 / 8)
+        return self.len
 
     def __getitem__(self, idx):
-        scene_id = int(idx / 7)
-        light_id = idx % 7 + 1
-        scene_img_path = f'{self.data_root}/{scene_id}_0.jpg'
-        light_img_path = f'{self.data_root}/{scene_id}_{light_id}.jpg'
-
-        scene_img = Image.open(scene_img_path).convert("RGB")
-        light_img = Image.open(light_img_path).convert("RGB")
-
-        scene_img = self.img_transform(scene_img).unsqueeze(0).to(self.device)
-        light_img = self.img_transform(light_img).unsqueeze(0).to(self.device)
-        
-        scene_cat_intrinsic, scene_extrinsic = get_image_intrinsic_extrinsic(self.model, scene_img)
-        light_cat_intrinsic, light_extrinsic = get_image_intrinsic_extrinsic(self.model, light_img)
         if self.for_decoder:
+            scene_id = int(idx / 7)
+            light_id = idx % 7 + 1
+            scene_img_path = f'{self.data_root}/{scene_id}_0.jpg'
+            light_img_path = f'{self.data_root}/{scene_id}_{light_id}.jpg'
+
+            scene_img = Image.open(scene_img_path).convert("RGB")
+            light_img = Image.open(light_img_path).convert("RGB")
+
+            scene_img = self.img_transform(scene_img).unsqueeze(0).to(self.device)
+            light_img = self.img_transform(light_img).unsqueeze(0).to(self.device)
+            
+            scene_cat_intrinsic, scene_extrinsic = get_image_intrinsic_extrinsic(self.model, scene_img, self.resize_size)
+            light_cat_intrinsic, light_extrinsic = get_image_intrinsic_extrinsic(self.model, light_img, self.resize_size)
             return scene_img, light_img, scene_cat_intrinsic, scene_extrinsic, light_extrinsic
         else:
-            return scene_cat_intrinsic, light_extrinsic
+            img_path = self.img_list[idx]
+            img = Image.open(img_path).convert("RGB")
+            img = self.img_transform(img).unsqueeze(0).to(self.device)
+            intrinsic, extrinsic = get_image_intrinsic_extrinsic(self.model, img, self.resize_size)
+            return intrinsic, extrinsic
+
+
+class MyImage(Dataset):
+    def __init__(self, args):
+        super().__init__()
+        self.img_list = glob.glob(f'{args.data_path}/*.jpg')
+        self.img_transform = preprocess(args.resize_size)
+
+    def __len__(self):
+        return len(self.img_list)
+    
+    def __getitem__(self, index):
+        img = Image.open(self.img_list[index]).convert("RGB")
+        img = self.img_transform(img)
+
+        return img

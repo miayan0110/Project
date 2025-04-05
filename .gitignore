@@ -2,6 +2,7 @@
 *.png
 *.jpg
 *.pyc
+*.zip
 datasets/*
 ckpt/*
 pretrained_weight/*

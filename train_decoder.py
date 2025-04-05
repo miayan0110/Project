@@ -20,6 +20,7 @@ def get_args():
     parser.add_argument('--batch_size', default=8, type=int)   # batch size
     parser.add_argument('--num_epochs', default=50, type=int)   # training number of epochs
     parser.add_argument('--num_train_timesteps', default=1000, type=int)   # training number of timesteps
+    parser.add_argument('--resize_size', default=64, type=int)   # resize size
     parser.add_argument('--resume', action='store_true')    # whether keep training the previous model or not
 
     parser.add_argument("--local-rank", default=0, type=int)

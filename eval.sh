@@ -16,9 +16,10 @@ echo "MASTER_ADDR="$MASTER_ADDR
 
 python -m torch.distributed.launch \
 --nproc_per_node=1 --master_port=${port} eval.py \
---gpu_id 3 \
+--gpu_id 5 \
+--resize_size 256 \
 --eval_mode extrinsic \
---eval_result_save_root 3_ex \
+--eval_result_save_root 6_ex \
 
 # gpu id | real id
 #    0   |    2
