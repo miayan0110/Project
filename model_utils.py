@@ -116,7 +116,7 @@ def train_intrinsic_diffusion(train_loader, args, device="cuda", save_root="./ck
         pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{args.num_epochs}")
         
         for batch in pbar:
-            intrinsic, _ = batch   
+            intrinsic, extrinsic = batch   
             inputs = intrinsic.squeeze(1).to(device) # shape: [batch, 110, 128, 128]
             optimizer.zero_grad()
             
@@ -241,6 +241,39 @@ def train_decoder(train_loader, args, device="cuda", save_root="./ckpt/decoder",
 # Evaluation
 #----------------------------------------------------------------------------
 
+def test_distribution(args, dataloader, device="cuda"):
+    log_subdir = f'{logdir}/distribution'
+    os.makedirs(log_subdir, exist_ok=True)
+    writer = SummaryWriter(log_subdir)
+
+    print('\nstart test distribution...')
+    torch.cuda.empty_cache()
+
+    with torch.inference_mode():
+        pbar = tqdm(dataloader, desc=f"Processing latent intrinsic")
+        for latent, _ in pbar:
+            writer.add_histogram("Real Dis.", latent, global_step=1000)
+
+        print('loading intrinsic diff...')
+        intrinsic_scheduler = DDPMScheduler(num_train_timesteps=args.num_train_timesteps)
+        intrinsic_diff = Diffusion(sample_size=int(args.resize_size/2), in_channels=110).to(device)
+        intrinsic_optimizer = optim.AdamW(intrinsic_diff.parameters(), lr=args.lr)
+        intrinsic_diff, _, _, _ = load_model(intrinsic_diff, intrinsic_optimizer, save_path=args.intrinsic_path, device=device)
+
+        intrinsic_diff.eval()
+        for i in tqdm(range(len(dataloader)), desc="Processing diffusion"):
+            intrinsic_noise = torch.randn(1, 110, int(args.resize_size/2), int(args.resize_size/2)).to(device)
+            for t in reversed(range(args.num_train_timesteps)):
+                t_tensor = torch.tensor([t], device=device)
+                pred_noise = intrinsic_diff(intrinsic_noise, timestep=t_tensor).sample
+                step_result = intrinsic_scheduler.step(pred_noise, t, intrinsic_noise)
+                intrinsic_noise = step_result.prev_sample
+                writer.add_histogram("Diffusion Dis.", intrinsic_noise, global_step=t)
+            intrinsic_latent = intrinsic_noise
+        del intrinsic_diff
+        torch.cuda.empty_cache()
+
+
 def part_eval(args, pretrained_model, device="cuda"):
     print('\nstart part evalution...')
     torch.cuda.empty_cache()
@@ -258,6 +291,7 @@ def part_eval(args, pretrained_model, device="cuda"):
         _, extrinsic_latent = get_image_intrinsic_extrinsic(pretrained_model, ex_img, args.resize_size)
         extrinsic_latent = extrinsic_latent.view(extrinsic_latent.shape[0], -1, 1, 1)
 
+        in_latent_list = []
         if args.eval_mode == 'intrinsic':
             print('evaluate intrinsic diff...')
             save_result_images(ex_img, f'{args.eval_result_save_root}/light.jpg')
@@ -273,6 +307,8 @@ def part_eval(args, pretrained_model, device="cuda"):
                 pred_noise = intrinsic_diff(intrinsic_noise, timestep=t_tensor).sample
                 step_result = intrinsic_scheduler.step(pred_noise, t, intrinsic_noise)
                 intrinsic_noise = step_result.prev_sample
+                if t % 100 == 0:
+                    in_latent_list.append((intrinsic_noise, t))
             intrinsic_latent = intrinsic_noise
             del intrinsic_diff
             torch.cuda.empty_cache()
@@ -304,8 +340,13 @@ def part_eval(args, pretrained_model, device="cuda"):
 
         decoder.eval()
         output_image = decoder(intrinsic_latent, extrinsic_latent)  # [1, 3, 256, 256]
-
         save_result_images(output_image, f'{args.eval_result_save_root}/result.jpg')
+
+        # # 生成1000到0步denoise的過程圖
+        # for latent, t in in_latent_list:
+        #     out_img = decoder(latent, extrinsic_latent)
+        #     save_result_images(out_img, f'{args.eval_result_save_root}/step_{t}.jpg')
+
 
 def eval(args, device="cuda"):
     print('\nstart evaluation...')

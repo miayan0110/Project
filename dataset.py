@@ -81,17 +81,26 @@ class StyLitGAN_Dataset(Dataset):
             return intrinsic, extrinsic
 
 
-class MyImage(Dataset):
-    def __init__(self, args):
+class LSUNDataset(Dataset):
+    def __init__(self, model, args):
         super().__init__()
-        self.img_list = glob.glob(f'{args.data_path}/*.jpg')
+        self.device = f'cuda:{args.gpu_id}'
+        self.model = model
         self.img_transform = preprocess(args.resize_size)
+        self.resize_size = args.resize_size
+        
+        self.img_list = glob.glob(f'{args.data_path}/*.jpg')[0:10000]
+        # self.img_list = glob.glob(f'{args.data_path}/*.jpg')
+        print(f'=> initializng LSUNDataset... total count: {len(self.img_list)}')
 
     def __len__(self):
         return len(self.img_list)
     
     def __getitem__(self, index):
-        img = Image.open(self.img_list[index]).convert("RGB")
-        img = self.img_transform(img)
+        img_path = self.img_list[index]
+        img = Image.open(img_path).convert("RGB")
+        img = self.img_transform(img).unsqueeze(0).to(self.device)
 
-        return img
+        cat_intrinsic, extrinsic = get_image_intrinsic_extrinsic(self.model, img, self.resize_size)
+
+        return cat_intrinsic, extrinsic

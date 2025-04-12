@@ -23,7 +23,7 @@ def get_args():
     parser.add_argument('--num_train_timesteps', default=1000, type=int)   # training number of timesteps
     parser.add_argument('--resize_size', default=256, type=int)   # resize size
     parser.add_argument('--resume', action='store_true')    # whether keep training the previous model or not
-    parser.add_argument('--eval_mode', default='all', type=str)    # which model to evaluate ('all', 'intrinsic', 'extrinsic', 'decoder')
+    parser.add_argument('--eval_mode', default='all', type=str)    # which model to evaluate ('all', 'intrinsic', 'extrinsic', 'decoder', 'test_dis')
 
     parser.add_argument('--eval_result_save_root', default='0', type=str)    # which model to evaluate ('all', 'intrinsic', 'extrinsic', 'decoder')
 
@@ -36,12 +36,12 @@ def main(args):
     intrinsic_list = glob.glob(f'{args.intrinsic_ckpt_root}/*.pth')
     intrinsic_list.sort()
     args.intrinsic_path = intrinsic_list[-1]
-    args.intrinsic_path = './ckpt/intrinsic/checkpoint_050.pth'
+    # args.intrinsic_path = './ckpt/intrinsic/checkpoint_180.pth'
 
     extrinsic_list = glob.glob(f'{args.extrinsic_ckpt_root}/*.pth')
     extrinsic_list.sort()
     args.extrinsic_path = extrinsic_list[-1]
-    args.extrinsic_path = './ckpt/extrinsic/checkpoint_050.pth'
+    # args.extrinsic_path = './ckpt/extrinsic/checkpoint_050.pth'
 
     decoder_list = glob.glob(f'{args.decoder_ckpt_root}/*.pth')
     decoder_list.sort()
@@ -52,6 +52,11 @@ def main(args):
         args.eval_result_save_root = f'./eval_result/all/{args.eval_result_save_root}'
         os.makedirs(args.eval_result_save_root, exist_ok=True)
         eval(args, device=f'cuda:{args.gpu_id}')
+    elif args.eval_mode == 'test_dis':
+        pretrained_model = load_latent_intrinsic(args.latent_intrinsic_weight, args.gpu_id)
+        dataset = LSUNDataset(pretrained_model, args)
+        dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
+        test_distribution(args, dataloader, device=f'cuda:{args.gpu_id}')
     else:
         args.eval_result_save_root = f'./eval_result/part/{args.eval_result_save_root}'
         os.makedirs(args.eval_result_save_root, exist_ok=True)

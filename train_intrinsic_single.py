@@ -31,8 +31,8 @@ def get_args():
 def main(args):
     pretrained_model = load_latent_intrinsic(args.latent_intrinsic_weight, args.gpu_id)
     
-    # dataset = MyImage(args)
-    dataset = StyLitGAN_Dataset(pretrained_model, args)
+    dataset = LSUNDataset(pretrained_model, args)
+    # dataset = StyLitGAN_Dataset(pretrained_model, args)
     # dataset = MIIWDataset(pretrained_model, args)
     diff_dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
 
