@@ -89,6 +89,7 @@ class LSUNDataset(Dataset):
         self.img_transform = preprocess(args.resize_size)
         self.resize_size = args.resize_size
         
+        # self.img_list = glob.glob(f'{args.data_path}/*.jpg')[0:args.batch_size]
         self.img_list = glob.glob(f'{args.data_path}/*.jpg')[0:10000]
         # self.img_list = glob.glob(f'{args.data_path}/*.jpg')
         print(f'=> initializng LSUNDataset... total count: {len(self.img_list)}')
@@ -103,4 +104,5 @@ class LSUNDataset(Dataset):
 
         cat_intrinsic, extrinsic = get_image_intrinsic_extrinsic(self.model, img, self.resize_size)
 
-        return cat_intrinsic, extrinsic
+        return cat_intrinsic, extrinsic, img
+        # return cat_intrinsic, extrinsic, img_path # for saving latent codes

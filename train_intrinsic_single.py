@@ -38,6 +38,7 @@ def main(args):
 
     train_intrinsic_diffusion(diff_dataloader, args, device=f'cuda:{args.gpu_id}', save_root=args.intrinsic_ckpt_root, resume=args.resume)
     # train_img_diffusion(diff_dataloader, args, device=f'cuda:{args.gpu_id}', save_root='./ckpt/image_diff', resume=args.resume)
+    # save_latent(diff_dataloader, './datasets/lsun_bedroom/lsun_train_code')
 
     # eval(args, device=f'cuda:{args.gpu_id}')    
     # eval(args, pretrained_model, device=f'cuda:{args.gpu_id}')    

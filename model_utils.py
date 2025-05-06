@@ -7,12 +7,13 @@ import torch.distributed as dist
 from torch.utils.data import Dataset
 import torchvision
 from torchvision import transforms
-from diffusers import DDPMScheduler
+from diffusers import DDPMScheduler, DDIMScheduler
 from tqdm import tqdm
 from PIL import Image
 import numpy as np
 
 from torch.utils.tensorboard import SummaryWriter
+from sklearn.decomposition import PCA
 
 from models import *
 from unets import UNet
@@ -98,46 +99,81 @@ def train_intrinsic_diffusion(train_loader, args, device="cuda", save_root="./ck
     os.makedirs(log_subdir, exist_ok=True)
     writer = SummaryWriter(log_subdir)
 
+    # Diffusion model
     model = Diffusion(sample_size=int(args.resize_size/2), in_channels=110).to(device)
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, betas=(0.9, 0.99))
-    noise_scheduler = DDPMScheduler(num_train_timesteps=args.num_train_timesteps)
     criterion = nn.MSELoss()
+
+    noise_scheduler = DDIMScheduler(
+        beta_start=1e-4, beta_end=0.02, beta_schedule="linear",
+        num_train_timesteps=args.num_train_timesteps,
+        prediction_type="epsilon"
+    )
+    noise_scheduler.set_timesteps(int(args.num_train_timesteps*0.011))
+
     start_epoch = 0
-    
     if resume:
-        ckpt_list = glob.glob(f'{save_root}/*.pth')
-        ckpt_list.sort()
+        ckpt_list = sorted(glob.glob(f'{save_root}/*.pth'))
         model, optimizer, start_epoch, _ = load_model(model, optimizer, ckpt_list[-1], device)
-    
-    model.train()
+
+    # Decoder (frozen)
+    decoder = Decoder2(in_channels=3, out_channels=3, latent_channels=174).to(device)
+    for p in decoder.parameters():
+        p.requires_grad = False
+    decoder.eval()
+    decoder_optimizer = optim.AdamW(decoder.parameters(), lr=args.lr)  # not used, but loader needs it
+    ckpt_list = sorted(glob.glob(f'./ckpt/decoder/*.pth'))
+    decoder, _, _, _ = load_model(decoder, decoder_optimizer, ckpt_list[-1], device)
+
     print('\nstart training intrinsic diffusion...')
     for epoch in range(start_epoch, args.num_epochs):
+        model.train()  # ensure diffusion model is in training mode
         epoch_loss = 0.0
         pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{args.num_epochs}")
-        
-        for batch in pbar:
-            intrinsic, extrinsic = batch   
-            inputs = intrinsic.squeeze(1).to(device) # shape: [batch, 110, 128, 128]
+
+        for intrinsic, extrinsic, img in pbar:
+            # prepare inputs
+            inputs = intrinsic.squeeze(1).to(device)     # [B,110,128,128]
+            extrinsic = extrinsic.view(intrinsic.shape[0], -1, 1, 1).to(device)
+            img = img.squeeze(1).to(device)
+
             optimizer.zero_grad()
-            
+
+            # forward diffusion + noise prediction loss
             noise = torch.randn_like(inputs)
             timesteps = torch.randint(0, noise_scheduler.num_train_timesteps, (inputs.shape[0],), device=device)
-
             noisy_inputs = noise_scheduler.add_noise(inputs, noise, timesteps)
-            
-            pred_noise = model(noisy_inputs, timesteps).sample
-            loss = criterion(pred_noise, noise)
-            
+            pred_noise  = model(noisy_inputs, timestep=timesteps).sample
+            diff_loss  = criterion(pred_noise, noise)
+
+            # DDIM 多步逆扩散生成 latent
+            with torch.no_grad():
+                latent = noisy_inputs
+                for t in noise_scheduler.timesteps:
+                    int_t = int(t)
+                    t_batch = torch.full((inputs.shape[0],), int_t, device=device, dtype=torch.long)
+                    eps_pred = model(latent, timestep=t_batch).sample
+                    latent = noise_scheduler.step(eps_pred, int_t, latent).prev_sample
+                intrinsic_latent = latent
+
+            # decode & reconstruction loss (decoder frozen, but grad flows to model)
+            reconstructed_img = decoder(intrinsic_latent, extrinsic)
+            recon_loss = criterion(reconstructed_img, img)
+
+            # combined loss & backward
+            loss = diff_loss + recon_loss
             loss.backward()
             optimizer.step()
-            
+
             epoch_loss += loss.item()
             pbar.set_postfix(loss=loss.item())
-        
-        print(f"Epoch {epoch+1} - Avg Loss: {epoch_loss / len(train_loader):.6f}")
-        writer.add_scalar('Intrinsic Loss', epoch_loss / len(train_loader), epoch+1)
+
+        avg = epoch_loss / len(train_loader)
+        print(f"Epoch {epoch+1} - Avg Loss: {avg:.6f}")
+        writer.add_scalar('Intrinsic Loss', avg, epoch+1)
+
         if (epoch+1) % args.save_per_epoch == 0:
-            save_model(model, optimizer, epoch + 1, epoch_loss / len(train_loader), f'{save_root}/checkpoint_{epoch+1:03d}.pth')
+            save_model(model, optimizer, epoch+1, avg, f'{save_root}/checkpoint_{epoch+1:03d}.pth')
 
 def train_extrinsic_diffusion(train_loader, args, device="cuda", save_root="./ckpt/extrinsic", resume=False):
     log_subdir = f'{logdir}/extrinsic_loss'
@@ -191,7 +227,7 @@ def train_decoder(train_loader, args, device="cuda", save_root="./ckpt/decoder",
     os.makedirs(log_subdir, exist_ok=True)
     writer = SummaryWriter(log_subdir)
 
-    decoder = Decoder(in_channels=3, out_channels=3, latent_channels=174).to(device)
+    decoder = Decoder2(in_channels=3, out_channels=3, latent_channels=174).to(device)
     optimizer = optim.AdamW(decoder.parameters(), lr=args.lr)
     criterion = nn.MSELoss()
     start_epoch = 0
@@ -242,7 +278,7 @@ def train_decoder(train_loader, args, device="cuda", save_root="./ckpt/decoder",
 #----------------------------------------------------------------------------
 
 def test_distribution(args, dataloader, device="cuda"):
-    log_subdir = f'{logdir}/distribution'
+    log_subdir = f'{logdir}/new_distribution_step{args.num_train_timesteps}'
     os.makedirs(log_subdir, exist_ok=True)
     writer = SummaryWriter(log_subdir)
 
@@ -250,10 +286,6 @@ def test_distribution(args, dataloader, device="cuda"):
     torch.cuda.empty_cache()
 
     with torch.inference_mode():
-        pbar = tqdm(dataloader, desc=f"Processing latent intrinsic")
-        for latent, _ in pbar:
-            writer.add_histogram("Real Dis.", latent, global_step=1000)
-
         print('loading intrinsic diff...')
         intrinsic_scheduler = DDPMScheduler(num_train_timesteps=args.num_train_timesteps)
         intrinsic_diff = Diffusion(sample_size=int(args.resize_size/2), in_channels=110).to(device)
@@ -261,17 +293,24 @@ def test_distribution(args, dataloader, device="cuda"):
         intrinsic_diff, _, _, _ = load_model(intrinsic_diff, intrinsic_optimizer, save_path=args.intrinsic_path, device=device)
 
         intrinsic_diff.eval()
-        for i in tqdm(range(len(dataloader)), desc="Processing diffusion"):
-            intrinsic_noise = torch.randn(1, 110, int(args.resize_size/2), int(args.resize_size/2)).to(device)
-            for t in reversed(range(args.num_train_timesteps)):
-                t_tensor = torch.tensor([t], device=device)
-                pred_noise = intrinsic_diff(intrinsic_noise, timestep=t_tensor).sample
-                step_result = intrinsic_scheduler.step(pred_noise, t, intrinsic_noise)
-                intrinsic_noise = step_result.prev_sample
-                writer.add_histogram("Diffusion Dis.", intrinsic_noise, global_step=t)
-            intrinsic_latent = intrinsic_noise
+        pbar = tqdm(dataloader, desc=f"Processing")
+        for i, (gt_latent, _, _) in enumerate(pbar):
+            gt_latent = gt_latent.squeeze(1)
+
+            sampled_latent_list = []
+            for batch in range(args.batch_size):
+                intrinsic_noise = torch.randn(1, 110, int(args.resize_size/2), int(args.resize_size/2)).to(device)
+                for t in reversed(range(args.num_train_timesteps)):
+                    t_tensor = torch.tensor([t], device=device)
+                    pred_noise = intrinsic_diff(intrinsic_noise, timestep=t_tensor).sample
+                    step_result = intrinsic_scheduler.step(pred_noise, t, intrinsic_noise)
+                    intrinsic_noise = step_result.prev_sample
+                sampled_latent_list.append(intrinsic_noise)
+                
+            sampled_latent = torch.cat(sampled_latent_list, 0)
+            log_latent_analysis(writer, gt_latent, sampled_latent, i)
         del intrinsic_diff
-        torch.cuda.empty_cache()
+        torch.cuda.empty_cache()            
 
 
 def part_eval(args, pretrained_model, device="cuda"):
@@ -291,25 +330,27 @@ def part_eval(args, pretrained_model, device="cuda"):
         _, extrinsic_latent = get_image_intrinsic_extrinsic(pretrained_model, ex_img, args.resize_size)
         extrinsic_latent = extrinsic_latent.view(extrinsic_latent.shape[0], -1, 1, 1)
 
-        in_latent_list = []
         if args.eval_mode == 'intrinsic':
             print('evaluate intrinsic diff...')
             save_result_images(ex_img, f'{args.eval_result_save_root}/light.jpg')
-            intrinsic_scheduler = DDPMScheduler(num_train_timesteps=args.num_train_timesteps)
             intrinsic_diff = Diffusion(sample_size=int(args.resize_size/2), in_channels=110).to(device)
             intrinsic_optimizer = optim.AdamW(intrinsic_diff.parameters(), lr=args.lr)
             intrinsic_diff, _, _, _ = load_model(intrinsic_diff, intrinsic_optimizer, save_path=args.intrinsic_path, device=device)
 
+            intrinsic_scheduler = DDIMScheduler(
+                beta_start=1e-4, beta_end=0.02, beta_schedule="linear",
+                num_train_timesteps=args.num_train_timesteps,
+                prediction_type="epsilon"
+            )
+            intrinsic_scheduler.set_timesteps(num_inference_steps=args.num_train_timesteps*0.011)
+
             intrinsic_diff.eval()
-            intrinsic_noise = torch.randn(1, 110, int(args.resize_size/2), int(args.resize_size/2)).to(device)
-            for t in reversed(range(args.num_train_timesteps)):
-                t_tensor = torch.tensor([t], device=device)
-                pred_noise = intrinsic_diff(intrinsic_noise, timestep=t_tensor).sample
-                step_result = intrinsic_scheduler.step(pred_noise, t, intrinsic_noise)
-                intrinsic_noise = step_result.prev_sample
-                if t % 100 == 0:
-                    in_latent_list.append((intrinsic_noise, t))
-            intrinsic_latent = intrinsic_noise
+            latent = torch.randn(1, 110, int(args.resize_size/2), int(args.resize_size/2)).to(device)
+            for t in intrinsic_scheduler.timesteps:
+                t_batch = torch.tensor([t], device=device)
+                eps_pred = intrinsic_diff(latent, timestep=t_batch).sample
+                latent = intrinsic_scheduler.step(eps_pred, t, latent).prev_sample
+            intrinsic_latent = latent
             del intrinsic_diff
             torch.cuda.empty_cache()
         elif args.eval_mode == 'extrinsic':
@@ -334,18 +375,13 @@ def part_eval(args, pretrained_model, device="cuda"):
             save_result_images(in_img, f'{args.eval_result_save_root}/scene.jpg')
             save_result_images(ex_img, f'{args.eval_result_save_root}/light.jpg')
 
-        decoder = Decoder(in_channels=3, out_channels=3, latent_channels=174).to(device)
+        decoder = Decoder2(in_channels=3, out_channels=3, latent_channels=174).to(device)
         decoder_optimizer = optim.AdamW(decoder.parameters(), lr=args.lr)
         decoder, _, _, _ = load_model(decoder, decoder_optimizer, save_path=args.decoder_path, device=device)
 
         decoder.eval()
         output_image = decoder(intrinsic_latent, extrinsic_latent)  # [1, 3, 256, 256]
         save_result_images(output_image, f'{args.eval_result_save_root}/result.jpg')
-
-        # # 生成1000到0步denoise的過程圖
-        # for latent, t in in_latent_list:
-        #     out_img = decoder(latent, extrinsic_latent)
-        #     save_result_images(out_img, f'{args.eval_result_save_root}/step_{t}.jpg')
 
 
 def eval(args, device="cuda"):
@@ -426,7 +462,6 @@ def get_image_intrinsic_extrinsic(model, img, resize_size):
     sigma = (rnd_normal * P_std + P_mean).exp().to(img.device) * 0 + 0.001
 
     noise = torch.randn_like(img)
-    noisy_img = img + noise * sigma
 
     intrinsic, extrinsic = model(img, run_encoder = True)
 
@@ -493,25 +528,15 @@ def save_model(model, optimizer, epoch, loss, save_path="diffusion_checkpoint.pt
     }, save_path)
     print('=> finished.')
 
-def save_visualize_images(rec_img, tar_img):
-    def tensor_to_image(tensor):
-        """Convert a tensor to a NumPy image array."""
-        img = (tensor.clamp(-1, 1) * 0.5 + 0.5).permute(0, 2, 3, 1).cpu().data.numpy() * 255
-        return img.astype(np.uint8)
+def save_latent(dataloader, root):
+    latent_dict_list = []
+    pbar = tqdm(dataloader, desc='Processing')
+    for i, (in_code, ex_code, path) in enumerate(pbar):
+        latent_dict_list.append({"path": path, "intrinsic": in_code.squeeze(0).squeeze(0).cpu(), "extrinsic": ex_code.squeeze(0).squeeze(0).cpu()})
 
-    # Convert tensors to images
-    rec_np = tensor_to_image(rec_img)
-    tar_np = tensor_to_image(tar_img)
-
-    # Concatenate along batch dimension (vertical stacking)
-    for i, (rec, tar) in enumerate(zip(rec_np, tar_np)):
-        concatenated_image = np.concatenate((rec, tar), axis=1)
-        img = Image.fromarray(concatenated_image)
-
-        # Save the concatenated image
-        path = f"./visualize/epoch_{i}.png"
-        print(f'=> saving image to {path}...')
-        img.save(path)
+        if (i+1) % 40 == 0:
+            torch.save(latent_dict_list, f"{root}/sub_{i+1:03d}.pt")
+            latent_dict_list = []    
 
 def save_result_images(img_tensor, path):
     def tensor_to_image(tensor):
@@ -526,3 +551,51 @@ def save_result_images(img_tensor, path):
     img = Image.fromarray(img_np)
     print(f"=> Saving image to {path}...")
     img.save(path)
+
+def log_latent_analysis(writer: SummaryWriter,
+                        gt_latent: torch.Tensor,
+                        sampled_latent: torch.Tensor,
+                        step: int,
+                        log_embedding: bool = True,
+                        pca_dim: int = 50):
+    """
+    Logs distributional info of ground truth and sampled latent to TensorBoard.
+
+    Parameters:
+        writer: TensorBoard SummaryWriter
+        gt_latent: Tensor of shape [B, C, H, W]
+        sampled_latent: Tensor of shape [B, C, H, W]
+        step: current global step
+        log_embedding: whether to log 2D/3D embedding visualization
+        pca_dim: dimension to reduce to before feeding to add_embedding
+    """
+    B = min(gt_latent.shape[0], sampled_latent.shape[0])
+    gt_flat = gt_latent[:B].reshape(B, -1)
+    sample_flat = sampled_latent[:B].reshape(B, -1)
+
+    if gt_flat.shape[1] != sample_flat.shape[1]:
+        print(f"[Error] Latent dims not aligned: gt={gt_flat.shape}, sample={sample_flat.shape}")
+        return
+
+    all_latents = torch.cat([gt_flat, sample_flat], dim=0)
+    labels = ['gt'] * B + ['sample'] * B
+
+    # Histogram + scalar
+    writer.add_histogram("latent_gt", gt_latent, step)
+    writer.add_histogram("latent_sample", sampled_latent, step)
+    writer.add_scalar("latent_gt/mean", gt_latent.mean().item(), step)
+    writer.add_scalar("latent_gt/std", gt_latent.std().item(), step)
+    writer.add_scalar("latent_sample/mean", sampled_latent.mean().item(), step)
+    writer.add_scalar("latent_sample/std", sampled_latent.std().item(), step)
+
+    # Embedding
+    if log_embedding:
+        try:
+            latent_np = all_latents.detach().cpu().numpy()
+            max_dim = min(pca_dim, latent_np.shape[0], latent_np.shape[1])
+            pca = PCA(n_components=max_dim)
+            reduced_latents = torch.tensor(pca.fit_transform(latent_np), dtype=torch.float32)
+            assert len(labels) == reduced_latents.shape[0], f"Metadata count {len(labels)} != latent count {reduced_latents.shape[0]}"
+            writer.add_embedding(reduced_latents, metadata=labels, tag='latent_comparison', global_step=step)
+        except Exception as e:
+            print(f"[Warning] PCA failed: {e}")

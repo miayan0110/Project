@@ -18,11 +18,11 @@ python -m torch.distributed.launch \
 --nproc_per_node=1 --master_port=${port} train_intrinsic_single.py \
 --gpu_id 7 \
 --data_path ./datasets/lsun_bedroom/lsun_train \
---save_per_epoch 1 \
---batch_size 8 \
---num_epochs 250 \
---resize_size 256 \
---resume \
+--save_per_epoch 10 \
+--batch_size 32 \
+--num_epochs 400 \
+--resize_size 64 \
+# --resume \
 
 # gpu id | real id
 #    0   |    2

@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from diffusers import UNet2DModel, UNet2DConditionModel, AutoencoderKL
+import torch.nn.functional as F
 
 class Diffusion(nn.Module):
     def __init__(self, sample_size, in_channels, is_intrinsic=True, is_eval=False):
@@ -66,3 +67,37 @@ class Decoder(nn.Module):
         feature = torch.cat([intrinsic, extrinsic], dim=1)  # [batch, 174, 128, 128]
         x = self.decoder(feature)     # [batch, 3, 256, 256]
         return x
+    
+
+class Decoder2(nn.Module):
+    def __init__(self, in_channels, out_channels, latent_channels, extrinsic_in_ch=16):
+        super().__init__()
+        vae = AutoencoderKL(
+            in_channels=in_channels + (latent_channels - in_channels),
+            out_channels=out_channels,
+            latent_channels=latent_channels,
+            block_out_channels=(128, 256),     # 不变
+            down_block_types=("DownEncoderBlock2D","DownEncoderBlock2D"),
+            up_block_types=("UpDecoderBlock2D","UpDecoderBlock2D")
+        )
+        self.decoder = vae.decoder
+        # 1×1 卷积把 extrinsic 通道映射到 (latent_channels - in_channels)
+        self.extr_proj = nn.Conv2d(
+            extrinsic_in_ch,
+            latent_channels-110,
+            kernel_size=1
+        )
+
+    def forward(self, intrinsic, extrinsic):
+        # intrinsic: [B, 110, H, W]
+        B, _, H, W = intrinsic.shape
+        # 上采样到 (H, W)
+        extr = F.interpolate(
+            extrinsic, 
+            size=(H, W),
+            mode='bilinear',
+            align_corners=False
+        )
+        extr = self.extr_proj(extr)               # [B, latent_channels-110, H, W]
+        feat = torch.cat([intrinsic, extr], dim=1)  # [B, latent_channels, H, W]
+        return self.decoder(feat)                   # decoder 会把 (H, W) → 最终输出大小
