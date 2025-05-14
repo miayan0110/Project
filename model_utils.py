@@ -342,7 +342,7 @@ def part_eval(args, pretrained_model, device="cuda"):
                 num_train_timesteps=args.num_train_timesteps,
                 prediction_type="epsilon"
             )
-            intrinsic_scheduler.set_timesteps(num_inference_steps=args.num_train_timesteps*0.011)
+            intrinsic_scheduler.set_timesteps(num_inference_steps=int(args.num_train_timesteps*0.051))
 
             intrinsic_diff.eval()
             latent = torch.randn(1, 110, int(args.resize_size/2), int(args.resize_size/2)).to(device)

@@ -36,7 +36,7 @@ def main(args):
     intrinsic_list = glob.glob(f'{args.intrinsic_ckpt_root}/*.pth')
     intrinsic_list.sort()
     args.intrinsic_path = intrinsic_list[-1]
-    # args.intrinsic_path = './ckpt/intrinsic/checkpoint_180.pth'
+    # args.intrinsic_path = './ckpt/intrinsic/checkpoint_150.pth'
 
     extrinsic_list = glob.glob(f'{args.extrinsic_ckpt_root}/*.pth')
     extrinsic_list.sort()

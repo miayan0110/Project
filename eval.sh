@@ -18,11 +18,11 @@ python -m torch.distributed.launch \
 --nproc_per_node=1 --master_port=${port} eval.py \
 --gpu_id 4 \
 --data_path ./datasets/lsun_bedroom/lsun_train \
---num_train_timesteps 250 \
+--num_train_timesteps 1000 \
 --batch_size 64 \
 --resize_size 64 \
 --eval_mode intrinsic \
---eval_result_save_root 390_new_in \
+--eval_result_save_root 205_v2_in \
 
 # gpu id | real id
 #    0   |    2
